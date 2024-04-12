@@ -240,9 +240,9 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         self.is_train = is_train
         # self.if_Ycbcr = self.args.if_Ycbcr
         self.if_Ycbcr = False
-        self.lq_hq_same_size = args.lq_hq_same_size
-        self.scale_factor = int(args.scale_factor)
-        self.support_size = args.support_size
+        self.lq_hq_same_size = args.lq_hq_same_size  #False
+        self.scale_factor = int(args.scale_factor)  #4
+        self.support_size = args.support_size   #20 相当于batchsize
 
         self.degradation_coefficient = None
         if is_train:
@@ -251,11 +251,16 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         else:
             self.hq_file_path = args.test_hq_file_path
             self.lq_file_path = args.test_lq_file_path
+        
+        #if is_train:
+            #hq_file_path中放HR图像，lq_file_path中放LR图像。LR中图像是HR中图像下采样四倍的结果，他们的数值一模一样
+        # Get_local_lq_hq_paths 里面需要修改，限定了只读png,jpg,bmp格式的图片
         self.lq_img_list, self.hq_img_list = Get_local_lq_hq_paths(self.lq_file_path, self.hq_file_path)
         
         self.dataset_len = self.__len__()
 
     def random_degradation_param(self):
+        ''''定义退化参数'''
         blur_kernel_size, blur_sigma, noise_level, jpeg_quality = None, None, None, None
         deg_cof = "deg"
         #generate degradation cofficients
@@ -273,9 +278,11 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         return deg_cof, blur_kernel_size, blur_sigma, noise_level, jpeg_quality
 
     def random_degradation_transfer(self, deg_cof, blur_kernel_size, blur_sigma, noise_level, jpeg_quality, bi_lr_patch, hr_patch):
+        '''根据退化参数对图像进行退化'''
         # [h, w, c]
         lr_deg_patch = deepcopy(bi_lr_patch)
         if self.args.add_gaussian_blur:
+            #对 hr_patch 应用高斯模糊，然后将模糊后的图像缩放到 lr_deg_patch 的大小。
             lr_patch_blur = cv2.GaussianBlur(hr_patch, blur_kernel_size, blur_sigma)
             lr_deg_patch = cv2.resize(lr_patch_blur,(lr_deg_patch.shape[1], lr_deg_patch.shape[0]), interpolation=cv2.INTER_CUBIC) 
         if self.args.add_noise:
@@ -288,7 +295,7 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
             lr_deg_patch = cv2.resize(lr_deg_patch,(hr_patch.shape[1], hr_patch.shape[0]), interpolation=cv2.INTER_CUBIC)
             if lr_deg_patch.shape[1] != hr_patch.shape[1] or lr_deg_patch.shape[0] != hr_patch.shape[0]:
                 print("size error")
-        
+            #bi_lr_patch是正常图像的四倍下采样，lr_deg_patch是正常图像块的退化图像（高斯模糊，加噪，jpeg压缩）
         return bi_lr_patch, lr_deg_patch, hr_patch, deg_cof
 
     def __getitem__(self, idx):
@@ -301,8 +308,8 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         
         deg_cof, blur_kernel_size, blur_sigma, noise_level, jpeg_quality = self.random_degradation_param()
 
-        for i in range(self.support_size):
-            bi_lr_patch, hr_patch = self._get_pair_patch(lr, hr, hr_size=int(self.args.hr_crop_size))
+        for i in range(self.support_size):  #20
+            bi_lr_patch, hr_patch = self._get_pair_patch(lr, hr, hr_size=int(self.args.hr_crop_size)) #192?
             bi_lr_patch, lr_patch, hr_patch, deg_cof = self.random_degradation_transfer(deg_cof, blur_kernel_size, blur_sigma, noise_level, jpeg_quality,bi_lr_patch, hr_patch)
             bi_lr_patch, lr_patch, hr_patch = self._augment([bi_lr_patch, lr_patch, hr_patch])
             #change cv2 mode from BGR to RGB
@@ -334,6 +341,7 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
             return idx
 
     def _load_file(self, idx):
+        """加载图像,他们的文件名称一模一样。参考div2k数据集"""
         idx = self._get_index(idx)
 
         hr = cv2.imread(os.path.join(self.hq_file_path, self.hq_img_list[idx]))
@@ -352,16 +360,18 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
 
 
     def _get_pair_patch(self, lr, hr, hr_size=512):
-        ih, iw = lr.shape[:2]
+        """返回lr和hr的patch,lr应该是hr的1/4,返回的lr_path是48*48,hr_path是192*192
+        而且返回的块就是同一部分,只是lr经过了四倍的下采样"""
+        ih, iw = lr.shape[:2]     #获得lr 的 h w
         # print(ih,iw)
 
-        tp = int(hr_size)
-        ip = int (tp // self.scale_factor)
+        tp = int(hr_size)            #192
+        ip = int (tp // self.scale_factor)  #48
 
-        ix = random.randrange(0, iw - ip + 1)
+        ix = random.randrange(0, iw - ip + 1) # 目的是切一个48*48的patch
         iy = random.randrange(0, ih - ip + 1)
 
-        tx, ty = self.scale_factor * ix, self.scale_factor * iy
+        tx, ty = self.scale_factor * ix, self.scale_factor * iy  #目的是切一个48*4的patch
 
         lr_patch = lr[iy:iy + ip, ix:ix + ip, :]
         hr_patch = hr[ty:ty + tp, tx:tx + tp, :]
