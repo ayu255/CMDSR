@@ -10,7 +10,7 @@ from tools.data_preprocess import add_jpeg, add_noise, Gaussian_blur, fspecial_g
 def Get_local_lq_hq_paths(lq_file_path, hq_file_path, shuffle=False):
     img_list = []    
     for img_name in os.listdir(lq_file_path):
-        if img_name[-3:] == 'png' or img_name[-3:] == 'jpg' or img_name[-3:] == 'bmp':
+        if img_name[-3:] == 'nii':
             img_list.append(img_name)
     if shuffle:
         seed = random.randint(0, 2 ** 32)
@@ -71,6 +71,11 @@ class SRDataSet(Dataset):
             for idx in range(len(self.hq_img_list)):
                 hr = cv2.imread(os.path.join(self.hq_file_path, self.hq_img_list[idx]))
                 lr = cv2.imread(os.path.join(self.lq_file_path, self.lq_img_list[idx]))
+                
+                #最大最小值归一化：
+                lr = (lr-lr.min())/(lr.max()-lr.min())
+                lr = (hr-hr.min())/(hr.max()-hr.min())
+        
                 if self.args.add_test_gaussian_blur:
                     lr = Gaussian_blur(hr, kernel, sf=self.scale_factor)
                 if self.args.add_test_noise:
@@ -276,6 +281,8 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
             deg_cof += "_blur_{}".format(str(blur_sigma))
         if self.args.add_noise:
             noise_level = int(random.randint(0,self.args.noise_level))
+            ##只有噪声需要改变，其余的都不需要
+            noise_level = noise_level
             deg_cof += "_noise_{}".format(str(noise_level))
         if self.args.add_jpeg:
             jpeg_quality = int(random.randint(self.args.jpeg_low_quality,self.args.jpeg_low_quality+self.args.jpeg_quality_range))
@@ -308,6 +315,10 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         
         lr, hr, filename = self._load_file(idx)
 
+        #最大最小值归一化：
+        lr = (lr-lr.min())/(lr.max()-lr.min())
+        lr = (hr-hr.min())/(hr.max()-hr.min())
+        
         #只resize的LR块 LR块 HR块 文件名
         bi_lr_patch_tensors, lr_patch_tensors, hr_patch_tesnors, filenames = [], [], [], []
         
