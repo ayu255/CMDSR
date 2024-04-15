@@ -14,10 +14,12 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 
 def quantize(img, rgb_range):
+    # 这个函数好像写错了，而且写了根本没有调用过
     pixel_range = 255 / rgb_range
     return np.uint8((img*pixel_range).round())
 
 def cal_params(net):
+    '''计算网络的规模'''
     params = list(net.parameters())
     k = 0
     for i in params:
@@ -29,7 +31,7 @@ def cal_params(net):
 
 def main():
     #Get args
-    args = set_args()
+    args = set_args()   #读取参数
     args = check_args(args)
     
     #to device finishing during model initial
@@ -42,11 +44,13 @@ def main():
     metaNet = metaNet.to(device)
     cal_params(metaNet)
     #dataset
-    args.support_size = args.support_size*2 
+    #每次返回同一张图像的不同块的相同退化，40张
+    args.support_size = args.support_size*2   #20*2？
     train_dataset = SRMultiGroupRandomTaskDataSet(args=args, is_train=True)
-    train_loader = DataLoader(train_dataset, batch_size=args.task_size, num_workers=1, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=args.task_size, num_workers=1, shuffle=True) #task_size=8
     args.support_size = args.support_size//2
     
+    #返回同一张图像的同一个块，20张
     test_dataset = SRDataSet(args=args, is_train=False, is_meta=True)
     test_loader = DataLoader(test_dataset, batch_size=1, num_workers=1, shuffle=False)
 

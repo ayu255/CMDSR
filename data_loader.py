@@ -40,7 +40,8 @@ class SRDataSet(Dataset):
             self.lq_file_path = args.test_lq_file_path
         self.lq_img_list, self.hq_img_list = Get_local_lq_hq_paths(self.lq_file_path, self.hq_file_path)
         if self.args.add_test_gaussian_blur or self.args.add_test_noise or self.args.add_test_jpeg:
-            self.lq_file_path = self._create_degradation_file()
+            #如果需要额外添加退化，就调用创建退化函数，自己重新创建一个退化文件
+            self.lq_file_path = self._create_degradation_file() 
         self.dataset_len = self.__len__()
 
 
@@ -77,7 +78,7 @@ class SRDataSet(Dataset):
                 if self.args.add_test_jpeg:
                     lr,_ = add_jpeg(lr, jpeg_level, None)
                 lr_path = os.path.join(lq_file_path, self.lq_img_list[idx])
-                cv2.imwrite(lr_path, lr)
+                cv2.imwrite(lr_path, lr) #把LR图像写入目录
         return lq_file_path
 
     def __getitem__(self, idx):
@@ -85,10 +86,11 @@ class SRDataSet(Dataset):
         lr, hr, filename = self._load_file(idx)
 
         # print(filename)
-        if self.is_train or self.if_test_crop:
+        if self.is_train or self.if_test_crop:    #False
         #random patch
             seed = random.randint(0, 2 ** 32)
             random.seed(seed)
+            #获得统一退化的图像块
             lr_patch, hr_patch = self._get_pair_patch(lr, hr, hr_size=int(self.args.hr_crop_size))
             lr_patch, hr_patch = self._augment([lr_patch, hr_patch])
         else:
@@ -106,7 +108,8 @@ class SRDataSet(Dataset):
 
         #ToTensor
         lr_patch, hr_patch = self._np2Tensor([lr_patch, hr_patch], rgb_range=255)
-        if self.is_meta:
+        #取同一张图像的20张48*48的切片。
+        if self.is_meta: #  True
             lr_support_patchs = []
             for i in range(self.args.support_size):
                 lr_support_patch = self._get_single_patch(lr, int(self.args.hr_crop_size // self.args.scale_factor))
@@ -186,7 +189,7 @@ class SRDataSet(Dataset):
         if self.args.is_train:
             ix = random.randrange(0, iw - lr_size + 1)
             iy = random.randrange(0, ih - lr_size + 1)
-        else:ix,iy=(iw - lr_size + 1)//2,(ih - lr_size + 1)//2
+        else:ix,iy=(iw - lr_size + 1)//2,(ih - lr_size + 1)//2  #如果是测试那取切片的时候是没有随机性的，如果是MRI好像边缘都是黑的
 
         lr_patch = lr[iy:iy + lr_size, ix:ix + lr_size, :]
 
@@ -242,7 +245,8 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         self.if_Ycbcr = False
         self.lq_hq_same_size = args.lq_hq_same_size  #False
         self.scale_factor = int(args.scale_factor)  #4
-        self.support_size = args.support_size   #20 相当于batchsize
+        self.support_size = args.support_size   #20 相当于batchsize  一个数据集里面20张图像
+
 
         self.degradation_coefficient = None
         if is_train:
@@ -254,13 +258,14 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         
         #if is_train:
             #hq_file_path中放HR图像，lq_file_path中放LR图像。LR中图像是HR中图像下采样四倍的结果，他们的数值一模一样
-        # Get_local_lq_hq_paths 里面需要修改，限定了只读png,jpg,bmp格式的图片
+        # TODO: Get_local_lq_hq_paths 里面需要修改，限定了只读png,jpg,bmp格式的图片
         self.lq_img_list, self.hq_img_list = Get_local_lq_hq_paths(self.lq_file_path, self.hq_file_path)
         
         self.dataset_len = self.__len__()
 
     def random_degradation_param(self):
         ''''定义退化参数'''
+        #TODO:读入的数据是0-255，添加噪声也是按照0-255的强度添加的，这里要改
         blur_kernel_size, blur_sigma, noise_level, jpeg_quality = None, None, None, None
         deg_cof = "deg"
         #generate degradation cofficients
@@ -295,26 +300,33 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
             lr_deg_patch = cv2.resize(lr_deg_patch,(hr_patch.shape[1], hr_patch.shape[0]), interpolation=cv2.INTER_CUBIC)
             if lr_deg_patch.shape[1] != hr_patch.shape[1] or lr_deg_patch.shape[0] != hr_patch.shape[0]:
                 print("size error")
-            #bi_lr_patch是正常图像的四倍下采样，lr_deg_patch是正常图像块的退化图像（高斯模糊，加噪，jpeg压缩）
+            #bi_lr_patch是正常图像的四倍下采样，lr_deg_patch是正常图像块的退化图像（在bi_lr_patch的基础上高斯模糊，加噪，jpeg压缩）
         return bi_lr_patch, lr_deg_patch, hr_patch, deg_cof
 
     def __getitem__(self, idx):
+        #每次调用都会返回同一张图像不同块的同样退化的LR-HR对。但是每次调用返回的退化类型不一样。
+        
         lr, hr, filename = self._load_file(idx)
 
+        #只resize的LR块 LR块 HR块 文件名
         bi_lr_patch_tensors, lr_patch_tensors, hr_patch_tesnors, filenames = [], [], [], []
         
         seed = random.randint(0, 2 ** 32)
         random.seed(seed)
         
+        #退化描述 
         deg_cof, blur_kernel_size, blur_sigma, noise_level, jpeg_quality = self.random_degradation_param()
 
-        for i in range(self.support_size):  #20
+        for i in range(self.support_size):  #配置文件里是20，调用的时候改成20*2了
+            #每次循环都会从同一张图像里随机选择图像块，执行同样的退化，组合成一个批次返回
             bi_lr_patch, hr_patch = self._get_pair_patch(lr, hr, hr_size=int(self.args.hr_crop_size)) #192?
             bi_lr_patch, lr_patch, hr_patch, deg_cof = self.random_degradation_transfer(deg_cof, blur_kernel_size, blur_sigma, noise_level, jpeg_quality,bi_lr_patch, hr_patch)
             bi_lr_patch, lr_patch, hr_patch = self._augment([bi_lr_patch, lr_patch, hr_patch])
             #change cv2 mode from BGR to RGB
+            #TODO:image_mode 应该改成灰度图像，而不是RGB
             bi_lr_patch, lr_patch, hr_patch = self._set_img_channel([bi_lr_patch, lr_patch, hr_patch], img_mode="RGB")
             #ToTensor
+            #TODO:这里还应该修改一下归一化的问题
             bi_lr_patch, lr_patch, hr_patch = self._np2Tensor([bi_lr_patch, lr_patch, hr_patch], rgb_range=255)
             
             bi_lr_patch_tensors.append(bi_lr_patch.unsqueeze(0))
@@ -342,6 +354,7 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
 
     def _load_file(self, idx):
         """加载图像,他们的文件名称一模一样。参考div2k数据集"""
+        # TODO:这里正式加载图像，需要修改
         idx = self._get_index(idx)
 
         hr = cv2.imread(os.path.join(self.hq_file_path, self.hq_img_list[idx]))
@@ -354,6 +367,7 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
         lr = cv2.imread(os.path.join(self.lq_file_path, self.lq_img_list[idx]))
         high_lr, width_lr, _ = lr.shape
 
+        #强制的超分4倍数，如果lr不是四倍就是resize成4倍
         if width_lr != width // self.scale_factor or high_lr != high // self.scale_factor:
             lr = cv2.resize(lr, (int(width // self.scale_factor), int(high // self.scale_factor)), interpolation=cv2.INTER_CUBIC)
         return lr, hr, filename
@@ -421,7 +435,7 @@ class SRMultiGroupRandomTaskDataSet(Dataset):
     def _set_img_channel(self, l, img_mode="RGB"):
         def _set_single_img_channel(img, img_mode):
             if img.ndim == 2:
-                img = np.expand_dims(img, axis=2)
+                img = np.expand_dims(img, axis=2) #扩展一个维度
 
             c = img.shape[2]
             if img_mode == "YCbCr" and c == 3:
